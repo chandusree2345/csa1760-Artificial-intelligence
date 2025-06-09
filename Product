@@ -1,0 +1,131 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <RTClib.h>
+#include <Servo.h>
+
+// LCD and RTC
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+RTC_DS3231 rtc;
+Servo feederServo;
+
+// Pin definitions
+const int switch1Pin = 2;
+const int switch2Pin = 3;
+const int switch3Pin = 4;
+const int trimmerPin = A0;
+const int servoPin = 9;
+
+// Switch state tracking
+bool prevSwitch1 = HIGH;
+bool prevSwitch2 = HIGH;
+bool prevSwitch3 = HIGH;
+
+// Feeding state
+int selectedInterval = 0;
+DateTime nextFeedTime;
+
+void setup() {
+  Wire.begin();
+  rtc.begin();
+  feederServo.attach(servoPin);
+  feederServo.write(0);
+  feederServo.detach();
+
+  lcd.init();
+  lcd.backlight();
+
+  pinMode(switch1Pin, INPUT_PULLUP);
+  pinMode(switch2Pin, INPUT_PULLUP);
+  pinMode(switch3Pin, INPUT_PULLUP);
+
+  Serial.begin(9600);
+
+  lcd.setCursor(0, 0);
+  lcd.print("Bird Feeder");
+  lcd.setCursor(0, 1);
+  lcd.print("Flip a Switch");
+}
+
+void loop() {
+  DateTime now = rtc.now();
+
+  // Read switch state
+  bool currentSwitch1 = digitalRead(switch1Pin);
+  bool currentSwitch2 = digitalRead(switch2Pin);
+  bool currentSwitch3 = digitalRead(switch3Pin);
+
+  // Detect new switch activation
+  if (prevSwitch1 == HIGH && currentSwitch1 == LOW) {
+    setInterval(1);
+  } else if (prevSwitch2 == HIGH && currentSwitch2 == LOW) {
+    setInterval(2);
+  } else if (prevSwitch3 == HIGH && currentSwitch3 == LOW) {
+    setInterval(3);
+  }
+
+  prevSwitch1 = currentSwitch1;
+  prevSwitch2 = currentSwitch2;
+  prevSwitch3 = currentSwitch3;
+
+  // Perform feeding once
+  if (selectedInterval > 0 && now >= nextFeedTime) {
+    feedBirds();
+    selectedInterval = 0;  // 🔁 Stop repeating
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Bird Feeder");
+    lcd.setCursor(0, 1);
+    lcd.print("Flip a Switch");
+  }
+
+  delay(200); // debounce
+}
+
+void setInterval(int mins) {
+  selectedInterval = mins;
+  DateTime now = rtc.now();
+  nextFeedTime = now + TimeSpan(0, 0, selectedInterval, 0);
+
+  int trimmerVal = 0;
+  for (int i = 0; i < 10; i++) {
+    trimmerVal += analogRead(trimmerPin);
+    delay(5);
+  }
+  trimmerVal /= 10;
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Bird Feeder ");
+  lcd.print(mins);
+  lcd.print("m");
+
+  lcd.setCursor(0, 1);
+  lcd.print("Trimmer: ");
+  lcd.print(trimmerVal);
+
+  Serial.print("Next feed at: ");
+  Serial.println(nextFeedTime.timestamp());
+
+  delay(1000);
+}
+
+void feedBirds() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Bird Feeder ");
+  lcd.print(selectedInterval);
+  lcd.print("m");
+
+  lcd.setCursor(0, 1);
+  lcd.print("Feeding...");
+
+  feederServo.attach(servoPin);
+  feederServo.write(90);
+  delay(2000);
+  feederServo.write(0);
+  delay(500);
+  feederServo.detach();
+
+  lcd.setCursor(0, 1);
+  lcd.print("                ");
+}
